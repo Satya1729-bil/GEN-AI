@@ -1,0 +1,6 @@
+# Optional: offline search with a local embedding model (RX_EMBED_BACKEND=local).
+# Install PyTorch first, CPU-only build:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# On Windows, PyTorch also needs the Microsoft Visual C++ Redistributable (x64).
+-r requirements.txt
+sentence-transformers>=3.0,<6

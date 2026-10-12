@@ -1,0 +1,16 @@
+services:
+  rxreveal:
+    build: .
+    image: rxreveal:latest
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      # Keep documents and the index outside the container so they survive restarts.
+      - ./data:/app/data
+      - rxreveal-index:/app/index
+    restart: unless-stopped
+
+volumes:
+  rxreveal-index:

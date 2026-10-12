@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run RxReveal (Streamlit)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "streamlit",
+      "args": ["run", "app.py"],
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": true
+    },
+    {
+      "name": "Build search index",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "rxreveal.build_index",
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ]
+}

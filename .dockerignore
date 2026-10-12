@@ -1,0 +1,14 @@
+.env
+.git
+.github
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+index
+data/uploads
+notebooks
+.vscode
+.idea
+.DS_Store
