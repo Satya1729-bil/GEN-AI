@@ -1,159 +1,288 @@
 # RxReveal: Medical Document Assistant
 
-RxReveal answers questions about your medical PDF documents. It finds the most relevant passages with semantic search (Gemini embeddings), then asks Google Gemini to write a short answer that cites those passages with page numbers. One free Gemini API key covers both.
+RxReveal is a Retrieval-Augmented Generation (RAG) application that answers questions about medical PDF documents. It uses semantic search with Gemini embeddings, FAISS vector indexing, and Google Gemini to generate concise answers grounded in retrieved passages, with page references for verification.
 
-It started as a Kaggle notebook for the Google x Kaggle Gen AI Intensive Course Capstone 2025Q1 (team: Md Haaris Hussain, Venkata Satyanarayana Gudala). This version is a full app you can run in VS Code, keep on GitHub and deploy with Docker. The original notebook is in `notebooks/`.
+Originally developed from a Kaggle notebook for the Google × Kaggle Gen AI Intensive Course Capstone 2025Q1, this version is a complete application that can run locally in VS Code, in Docker, or on a compatible cloud platform.
 
-> **Important: patient data and the free Gemini tier.** The text of your documents is sent to Google twice: once to build the search index, and again as context for each answer. On the free (unpaid) tier, Google may use this data to improve its products, and human reviewers may read it. Google's terms say not to send sensitive, confidential or personal information to the free tier ([Gemini API terms](https://ai.google.dev/gemini-api/terms)). Use the free tier only with synthetic or public documents, like the sample file in `data/`. For real patient records, use a paid Gemini plan or Vertex AI with the right data agreements, and follow the laws that apply to you (for example HIPAA in the US or the DPDP Act in India).
+**Core technologies:** Python, Streamlit, Google Gemini, embeddings, FAISS, RAG, Docker, pytest, and GitHub Actions.
 
-## How it works
+## Important: Patient Data and Privacy
 
+The text of your documents is sent to Google twice when using Gemini embeddings: first to create the search index and later as context for answering questions.
+
+Google's terms and data practices depend on the API service and plan. The project documentation warns that data submitted through the free, unpaid Gemini API tier may be used to improve Google's products and may be reviewed by human reviewers.
+
+- Use synthetic or public documents with the free tier.
+- Do not upload sensitive, confidential, or personally identifiable patient records without appropriate safeguards and suitable data agreements.
+- For real patient records, evaluate a paid Gemini service or Vertex AI with the appropriate contractual and privacy protections.
+- Follow applicable laws and regulations, including HIPAA where relevant and India's Digital Personal Data Protection (DPDP) framework where applicable.
+
+See the [Gemini API Terms](https://ai.google.dev/gemini-api/terms) before using the service with sensitive information.
+
+## How It Works
+
+RxReveal uses a RAG pipeline to retrieve relevant information from PDF documents before generating an answer.
+
+```text
+Medical PDF documents
+        |
+        v
+PDF text extraction with page information
+        |
+        v
+Text processing and chunking
+        |
+        v
+Gemini embeddings
+        |
+        v
+FAISS vector index
+        |
+        v
+User asks a question
+        |
+        v
+Question embedding and semantic search
+        |
+        v
+Retrieve top relevant passages
+        |
+        v
+Google Gemini generates a grounded answer
+        |
+        v
+Answer with source and page citations
 ```
-PDF files -> text by page -> one chunk per patient record -> embeddings (gemini-embedding-2)
-          -> FAISS index -> top passages for a question -> Gemini answer with [1][2] citations
+
+### Key Components
+
+- **PDF ingestion:** Extracts document text and preserves page references.
+- **Chunking:** Splits patient records by `Patient <n>:` headings where applicable. Other documents are divided into paragraphs of approximately 1,200 characters.
+- **Embeddings:** Converts document chunks and questions into vector representations using Gemini embeddings.
+- **Vector search:** Uses FAISS and cosine similarity to find relevant passages.
+- **Retrieval:** Selects the top matching passages and filters out results below a configured minimum score.
+- **Answer generation:** Passes retrieved context to Gemini to generate a concise answer.
+- **Source citations:** Displays references such as `[1]` and `[2]` associated with relevant passages and page numbers.
+- **Local embedding option:** Supports a MiniLM embedding backend for local semantic search.
+
+If no sufficiently relevant information is found, the application is designed to indicate that the documents do not provide a relevant answer.
+
+## End-to-End Workflow
+
+The following diagram describes the complete application flow from document ingestion to answer generation and deployment.
+
+```mermaid
+flowchart TD
+    A["Medical PDF Documents"] --> B["PDF Text Extraction"]
+    B --> C["Page-Aware Text Processing"]
+    C --> D["Chunking"]
+    D --> E["Generate Embeddings"]
+    E --> F["FAISS Vector Index"]
+
+    G["User Question"] --> H["Question Embedding"]
+    H --> I["Semantic Similarity Search"]
+    F --> I
+
+    I --> J["Retrieve Top-K Passages"]
+    J --> K{"Relevant Passages Found?"}
+
+    K -- Yes --> L["Build Context with Page References"]
+    K -- No --> M["Return No Relevant Information"]
+
+    L --> N["Google Gemini"]
+    N --> O["Generate Grounded Answer"]
+    O --> P["Display Answer and Citations"]
+
+    P --> Q["User Verifies Source PDF"]
 ```
 
-- **Chunking:** records are split on `Patient <n>:` headings, so each patient stays in one chunk, even across a page break. Other documents are split into paragraphs of about 1,200 characters.
-- **Search:** Gemini embeddings and cosine similarity in FAISS. No PyTorch needed, so it installs on any laptop and the Docker image stays small. Passages below a minimum match score are dropped.
-- **Answers:** Gemini answers only from the passages. If nothing relevant is found, it says so.
-- **Offline search (optional):** set `RX_EMBED_BACKEND=local` and install `requirements-local.txt` to embed with a local MiniLM model instead. This needs PyTorch, and on Windows the Microsoft Visual C++ Redistributable. The app re-indexes automatically when you switch.
+### Step 1: Load Documents
 
-## Project structure
+The application reads PDF documents from the `data/` directory or from the browser upload interface when uploads are enabled.
 
-```
+The repository includes a synthetic sample document for demonstration.
+
+### Step 2: Extract Text
+
+The ingestion module extracts text from the PDF and retains page information for citation purposes. Scanned PDFs may require OCR if their text is not directly extractable.
+
+### Step 3: Split Documents into Chunks
+
+The extracted text is divided into searchable sections.
+
+- Patient records are split using `Patient <n>:` headings.
+- A patient record can remain in one chunk even when it crosses a page boundary.
+- Other documents are split into paragraphs of approximately 1,200 characters by default.
+
+### Step 4: Generate Embeddings
+
+Each chunk is converted into a vector using the configured embedding backend. These vectors represent semantic information and support meaning-based retrieval.
+
+The default backend uses Gemini embeddings. An optional local MiniLM backend is available.
+
+### Step 5: Build the FAISS Index
+
+FAISS stores the vectors and supports similarity search. The index is built when needed, and the application can rebuild it when relevant settings change.
+
+### Step 6: Accept a User Question
+
+The user enters a question in the Streamlit interface about the available documents.
+
+For example:
+
+> What information does the document provide about Patient 1?
+
+### Step 7: Retrieve Relevant Passages
+
+RxReveal embeds the question and searches the FAISS index for similar document chunks.
+
+- `RX_TOP_K` controls how many passages are considered.
+- `RX_MIN_SCORE` sets the minimum similarity score for retaining a passage.
+
+### Step 8: Generate the Answer
+
+The retrieved passages are sent to Google Gemini as context. The model generates an answer grounded in the supplied information.
+
+### Step 9: Show Citations
+
+The interface displays the answer with references to relevant passages and page numbers, allowing users to verify the information in the original PDF.
+
+### Step 10: Test and Deploy
+
+The application can be run locally with Streamlit, packaged with Docker, tested with pytest, and built through the configured GitHub Actions workflow. It can also be deployed to Google Cloud Run or another compatible container platform.
+
+## Features
+
+- Medical PDF question answering.
+- Semantic retrieval using vector embeddings.
+- FAISS-based similarity search.
+- Context-grounded Gemini responses.
+- Page-aware source citations.
+- Configurable retrieval settings.
+- Optional local MiniLM embedding backend.
+- Streamlit user interface.
+- Docker and Docker Compose support.
+- Automated tests and Docker build through GitHub Actions.
+- Configurable password protection and PDF uploads.
+
+## Technology Stack
+
+| Category | Technology |
+|---|---|
+| Language | Python |
+| User interface | Streamlit |
+| Large language model | Google Gemini |
+| Embeddings | Gemini embeddings or local MiniLM |
+| Vector search | FAISS |
+| Document processing | PDF text extraction |
+| Testing | pytest |
+| Containerization | Docker, Docker Compose |
+| CI | GitHub Actions |
+| Cloud deployment | Google Cloud Run or compatible platforms |
+
+## Project Structure
+
+```text
 rxreveal/
-  app.py                  Streamlit app (UI and theme)
-  rxreveal/
-    config.py             Settings from environment variables
-    ingest.py             PDF reading and chunking
-    index.py              Embeddings and FAISS index
-    llm.py                Gemini client
-    rag.py                Retrieve, then generate
-    build_index.py        Command to build the index
-  data/                   Put your PDFs here (sample file included, fake data)
-  scripts/
-    make_sample_pdf.py    Creates a PDF of fake patient records
-    start.sh              Container start script
-  tests/                  Unit tests (pytest)
-  notebooks/              Original Kaggle notebook
-  .streamlit/config.toml  Clean medical theme
-  Dockerfile, docker-compose.yml, .github/workflows/ci.yml
+├── app.py
+├── rxreveal/
+│   ├── config.py
+│   ├── ingest.py
+│   ├── index.py
+│   ├── llm.py
+│   ├── rag.py
+│   └── build_index.py
+├── data/
+│   └── synthetic sample documents
+├── scripts/
+│   ├── make_sample_pdf.py
+│   └── start.sh
+├── tests/
+├── notebooks/
+├── .streamlit/
+│   └── config.toml
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+├── Dockerfile
+├── docker-compose.yml
+└── README.md
 ```
 
-## 1. Run it in VS Code
+| File or directory | Purpose |
+|---|---|
+| `app.py` | Streamlit application interface |
+| `rxreveal/config.py` | Reads configuration from environment variables |
+| `rxreveal/ingest.py` | PDF reading and text chunking |
+| `rxreveal/index.py` | Embedding generation and FAISS indexing |
+| `rxreveal/llm.py` | Gemini client integration |
+| `rxreveal/rag.py` | Retrieval and answer generation |
+| `rxreveal/build_index.py` | Builds the document search index |
+| `data/` | PDF documents used by the application |
+| `scripts/` | Utility and container startup scripts |
+| `tests/` | Automated tests |
+| `notebooks/` | Original Kaggle notebook |
+| `.github/workflows/ci.yml` | Automated testing and Docker build workflow |
 
-You need Python 3.11 or 3.12 and VS Code with the Python extension.
+## Getting Started
 
-1. Open the `rxreveal` folder in VS Code (**File > Open Folder**).
-2. Open a terminal (**Terminal > New Terminal**) and create a virtual environment:
+### Prerequisites
 
-   Windows (PowerShell):
-   ```powershell
-   python -m venv .venv
-   .venv\Scripts\Activate.ps1
-   ```
-   macOS or Linux:
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
+Install:
 
-3. Install the packages:
-   ```bash
-   pip install -r requirements-dev.txt
-   ```
+- Python 3.11 or 3.12.
+- Visual Studio Code with the Python extension.
+- Git.
+- Docker Desktop if you want to use containers.
+- A Gemini API key for the default embedding and generation backends.
 
-4. Get a free Gemini API key at [Google AI Studio](https://aistudio.google.com/apikey). Copy `.env.example` to `.env` and paste the key after `GEMINI_API_KEY=`. The key is required, because search uses Gemini embeddings.
-
-5. Add documents. A sample file of fake records is already in `data/`. To use the Kaggle dataset, download `synthetic_medical_records.pdf` from Kaggle and put it in `data/`.
-
-6. Build the search index:
-   ```bash
-   python -m rxreveal.build_index
-   ```
-   It should print `Indexed 31 chunks from 1 file(s) ... using gemini:gemini-embedding-2:768`. The app also builds the index on first start if it is missing.
-
-7. Start the app:
-   ```bash
-   streamlit run app.py
-   ```
-   It opens at http://localhost:8501. You can also press **F5** in VS Code and pick **Run RxReveal (Streamlit)**.
-
-Run the tests with `pytest`, or from the Testing panel in VS Code.
-
-## 2. Put it on GitHub
-
-1. Create an empty repository on GitHub (no README, no .gitignore), for example `rxreveal`.
-2. In the VS Code terminal:
-   ```bash
-   git init
-   git add .
-   git commit -m "RxReveal: Streamlit app with Gemini RAG"
-   git branch -M main
-   git remote add origin https://github.com/<your-username>/rxreveal.git
-   git push -u origin main
-   ```
-
-`.gitignore` keeps your `.env` file, the built index and any uploaded PDFs out of GitHub. Only the fake sample PDF is committed. Every push runs the tests and a Docker build on GitHub Actions (see the **Actions** tab).
-
-## 3. Run it with Docker
+### 1. Clone the Repository
 
 ```bash
-docker compose up --build
+git clone https://github.com/Satya1729-bil/GEN-AI.git
+cd GEN-AI
 ```
 
-Open http://localhost:8501. The container reads your `.env` file, keeps `data/` on your machine, and builds the index on first start.
+Ensure you are in the project directory containing `app.py` and the `rxreveal/` package.
 
-Without Compose:
+### 2. Open the Project in VS Code
+
+Open VS Code, select **File → Open Folder**, and choose the project directory.
+
+Open a terminal using **Terminal → New Terminal**.
+
+### 3. Create a Virtual Environment
+
+**Windows PowerShell:**
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+**macOS or Linux:**
+
 ```bash
-docker build -t rxreveal .
-docker run -p 8501:8501 --env-file .env rxreveal
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
-## 4. Deploy to production
+### 4. Install Dependencies
 
-The image runs on any service that runs containers. It listens on the `PORT` environment variable (default 8501) and has a health check at `/_stcore/health`.
-
-**Google Cloud Run** (good fit, since you already use Gemini):
 ```bash
-gcloud run deploy rxreveal --source . --region asia-south1 \
-  --memory 1Gi --allow-unauthenticated \
-  --set-env-vars GEMINI_MODEL=gemini-3.8-flash,RX_ALLOW_UPLOAD=false \
-  --set-secrets GEMINI_API_KEY=gemini-api-key:latest,APP_PASSWORD=rxreveal-password:latest
+pip install -r requirements-dev.txt
 ```
-Create the two secrets in Secret Manager first.
 
-**Render or Railway:** create a new web service from your GitHub repository, choose Docker, and add `GEMINI_API_KEY` and `APP_PASSWORD` as environment variables. 1 GB of memory is enough.
+### 5. Configure the Gemini API Key
 
-### Production checklist
+1. Create a Gemini API key in [Google AI Studio](https://aistudio.google.com/apikey).
+2. Copy `.env.example` to `.env`.
+3. Add your key to the `.env` file:
 
-- Set `APP_PASSWORD` so only your team can use the app.
-- Keep the API key in the host's secret settings, never in the code or the image.
-- Decide how documents get in. On Cloud Run and similar services the disk is wiped on restart, so either bake approved PDFs into the image (put them in `data/` before building) or set `RX_ALLOW_UPLOAD=false` and attach persistent storage.
-- Read the patient data note at the top before using real records.
-- If Google renames the model, update `GEMINI_MODEL`. The app shows a clear message when a model is not found.
+```dotenv
+GEMINI_API_KEY=your_gemini_api_key_here
+```
 
-## Settings
+Replace the placeholder with your actual key. Keep `.env` out of Git and never commit API keys to the repository.
 
-| Variable | Default | What it does |
-|---|---|---|
-| `GEMINI_API_KEY` | none | Gemini key, used for search and answers |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | Model that writes the answers |
-| `RX_EMBED_BACKEND` | `gemini` | Search backend: `gemini` or `local` (offline, needs PyTorch) |
-| `RX_GEMINI_EMBED_MODEL` | `gemini-embedding-2` | Gemini embedding model |
-| `RX_EMBED_DIMENSION` | `768` | Size of the Gemini embeddings |
-| `APP_PASSWORD` | none | Turns on a password screen |
-| `RX_ALLOW_UPLOAD` | `true` | Allow PDF uploads in the browser |
-| `RX_TOP_K` | `5` | Passages given to the model per question |
-| `RX_MIN_SCORE` | `0.20` | Minimum match score for a passage |
-| `RX_CHUNK_SIZE` | `1200` | Maximum characters per chunk |
-| `RX_MAX_UPLOAD_MB` | `25` | Maximum upload size per file |
-| `RX_EMBED_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Local embedding model (only with `RX_EMBED_BACKEND=local`) |
-
-The app re-indexes automatically when the embedding settings change. If you change the chunk settings, click **Rebuild index** in the sidebar.
-
-## Credits
-
-Built on the Gen AI Intensive Course Capstone 2025Q1 by Google and Kaggle. Blog post: [Building a Medical Document Q&A Assistant with Gen AI and RAG](https://medium.com/@mdhaarishussain/building-a-medical-document-q-a-assistant-with-gen-ai-and-rag-77544b66aaa7).
-
-RxReveal is for information only and does not give medical advice.
+### 6. Add
